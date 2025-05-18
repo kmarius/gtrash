@@ -219,23 +219,42 @@ func getAllMountpoints() ([]string, error) {
 		return nil, err
 	}
 
-	// sometimes, same mountpoint exists, so must take a unique
-	mountpoints := make([]string, 0, len(infos))
-	exists := make(map[string]struct{}, len(infos))
-	for i := range infos {
-		m := infos[i].Mountpoint
+	// uniquely identify topdirs by the major,minor id of the filesystem and the path in that filesystem, which is
+	// precisely the "root" of this mount (and not the mount point)
+	type Topdir struct {
+		Root  string
+		Major int
+		Minor int
+	}
 
-		if _, ok := exists[m]; ok {
-			// duplicate entry detected
-			slog.Debug("duplicated mountpoint is detected", "mountpoint", m)
+	// sometimes (e.g. when using autofs), duplicate mountpoints exist
+	mountpoints := make(map[string]struct{}, len(infos))
+
+	// ensure we don't have duplicate topdirs: bind mounts make it possible that different mounts point
+	// to the same topdir (i.e. .Trash directory)
+	topdirs := make(map[Topdir]struct{}, len(infos))
+
+	for _, m := range infos {
+
+		topdir := Topdir{
+			m.Root, m.Major, m.Minor,
+		}
+
+		if _, ok := topdirs[topdir]; ok {
+			slog.Debug("skipping duplicate topdir", "mountpoint", m.Mountpoint)
 			continue
 		}
 
-		mountpoints = append(mountpoints, m)
-		exists[m] = struct{}{}
+		topdirs[topdir] = struct{}{}
+		mountpoints[m.Mountpoint] = struct{}{}
 	}
 
-	return mountpoints, nil
+	result := make([]string, 0, len(mountpoints))
+	for m := range mountpoints {
+		result = append(result, m)
+	}
+
+	return result, nil
 }
 
 var mountinfo_GetMounts = mountinfo.GetMounts
